@@ -45,6 +45,11 @@ svg.climograma { display: block; width: 100%; height: auto }
 .clima table { font-size: .78rem } .clima th, .clima td { padding: 3px 5px }
 .credito { font-size: .95rem; color: var(--gris) } .credito b { color: var(--tinta) }
 .gps { display: grid; gap: 8px }
+.hud { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 2; display: grid; gap: 5px; background: color-mix(in srgb, var(--hoja) 92%, transparent);
+  border: 1px solid var(--linea); border-left: 4px solid #1d4f9c; border-radius: 12px; padding: 9px 12px; font-size: .9rem; backdrop-filter: blur(6px) }
+.hud-fila { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: baseline } .hud-fila b { font-size: 1.05rem }
+.hud .barra-t { height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden } .hud .barra-t i { display: block; height: 100%; width: 0; background: #e7b416 }
+.etiqueta-bus i { background: #1d4f9c !important; font-size: .7rem }
 .gps-info { display: grid; gap: 3px; background: var(--hoja); border: 1px solid var(--linea); border-left: 4px solid #d63a2f; border-radius: 10px; padding: 10px 12px; font-size: .92rem }
 .etiqueta-yo i { background: #d63a2f }
 .qr-guia { display: flex; gap: 12px; align-items: center; margin-top: 6px } .qr-guia svg { width: 104px; height: 104px; flex: none; background: #fff; border-radius: 8px; padding: 3px; border: 1px solid var(--linea) }
@@ -1547,12 +1552,21 @@ function crearMapa3D(cont, cfg) {
   escena.add(sol);
 
   // rutas (un tubo por día)
-  const tubos = {};
+  const tubos = {}, curvas = {}, avance = {};
   cfg.rutas.forEach((r) => {
     const v = r.puntos.map(([la, lo]) => { const [x, z] = aXZ(la, lo); return new THREE.Vector3(x, Y(altura(la, lo)) + 0.6, z); });
     const curva = new THREE.CatmullRomCurve3(v, false, "centripetal");
     const m = new THREE.MeshBasicMaterial({ color: r.color, transparent: true, opacity: 1 });
-    const t = new THREE.Mesh(new THREE.TubeGeometry(curva, Math.min(v.length * 2, 1600), 0.75, 6, false), m);
+    const segs = Math.min(v.length * 2, 1600);
+    const t = new THREE.Mesh(new THREE.TubeGeometry(curva, segs, 0.75, 6, false), m);
+    curvas[r.dia] = curva;
+    // tramo ya recorrido: tubo más grueso y dorado que se va mostrando con drawRange
+    const gA = new THREE.TubeGeometry(curva, segs, 1.15, 8, false);
+    gA.setDrawRange(0, 0);
+    const tA = new THREE.Mesh(gA, new THREE.MeshBasicMaterial({ color: cfg.colorAvance || 0xe7b416 }));
+    tA.visible = false;
+    escena.add(tA);
+    avance[r.dia] = { mesh: tA, segs, radial: 8 };
     escena.add(t);
     tubos[r.dia] = t;
   });
@@ -1675,6 +1689,103 @@ function crearMapa3D(cont, cfg) {
     if (etYo) etYo.hidden = true;
   }
 
+  // autobús de Chapingo: recorre la ruta del día y marca el tramo recorrido
+  let bus = null, etBus = null, paseo = null;
+  function texturaBus(lado) {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 96;
+    const g = c.getContext("2d");
+    g.fillStyle = "#fbfbf7"; g.fillRect(0, 0, 256, 96);
+    g.fillStyle = "#1d4f9c"; g.fillRect(0, 54, 256, 22);
+    g.fillStyle = "#c9a227"; g.fillRect(0, 76, 256, 6);
+    if (lado) {
+      g.fillStyle = "#3b5566";
+      for (let i = 0; i < 6; i++) g.fillRect(14 + i * 40, 12, 30, 30);
+      g.fillStyle = "#ffffff"; g.font = "bold 20px Palatino Linotype, Georgia, serif"; g.textAlign = "center"; g.fillText("CHAPINGO", 128, 72);
+    } else {
+      g.fillStyle = "#3b5566"; g.fillRect(16, 12, 224, 32);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.anisotropy = 4;
+    return t;
+  }
+  function crearBus() {
+    const lado = new THREE.MeshLambertMaterial({ map: texturaBus(true) });
+    const frente = new THREE.MeshLambertMaterial({ map: texturaBus(false) });
+    const techo = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    // eje x = largo del autobús
+    const cuerpo = new THREE.Mesh(new THREE.BoxGeometry(5.2, 2.2, 2.1), [frente, frente, techo, techo, lado, lado]);
+    cuerpo.position.y = 1.5;
+    const sombra = new THREE.Mesh(new THREE.CircleGeometry(3.6, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
+    sombra.rotation.x = -Math.PI / 2; sombra.position.y = 0.2;
+    bus = new THREE.Group();
+    bus.add(sombra, cuerpo);
+    escena.add(bus);
+    etBus = document.createElement("div");
+    etBus.className = "etiqueta-3d etiqueta-bus";
+    etBus.innerHTML = "<i>🚌</i><span>Chapingo</span>";
+    capa.appendChild(etBus);
+  }
+  function marcarAvance(dia, t) {
+    Object.entries(avance).forEach(([d, a]) => {
+      const activo = Number(d) === dia;
+      a.mesh.visible = activo && t > 0;
+      if (activo) a.mesh.geometry.setDrawRange(0, Math.floor(Math.max(0, Math.min(1, t)) * a.segs) * a.radial * 6);
+    });
+  }
+  function ponerBus(dia, t, opc = {}) {
+    const curva = curvas[dia];
+    if (!curva) return false;
+    if (!bus) crearBus();
+    t = Math.max(0, Math.min(1, t));
+    const p = curva.getPointAt(t), q = curva.getPointAt(Math.min(1, t + 0.003)), r = curva.getPointAt(Math.max(0, t - 0.003));
+    const dir = (t < 0.997 ? q.clone().sub(p) : p.clone().sub(r)).setY(0);
+    bus.position.copy(p);
+    bus.rotation.set(0, Math.atan2(-dir.z, dir.x), 0);
+    bus.visible = true; etBus.hidden = false;
+    marcarAvance(dia, t);
+    if (opc.seguir) {
+      const d = dir.lengthSq() ? dir.normalize() : new THREE.Vector3(1, 0, 0);
+      const posCam = p.clone().add(d.multiplyScalar(-34)).add(new THREE.Vector3(0, 24, 0));
+      camara.position.lerp(posCam, opc.suave === false ? 1 : 0.06);
+      if (controles) controles.target.lerp(p, opc.suave === false ? 1 : 0.12); else camara.lookAt(p);
+    }
+    return true;
+  }
+  function quitarBus() {
+    paseo = null;
+    if (bus) bus.visible = false;
+    if (etBus) etBus.hidden = true;
+    marcarAvance(-1, 0);
+  }
+  function recorrer(dia, opc = {}) {
+    if (!curvas[dia]) return null;
+    anim = null;
+    paseo = { dia, t: opc.desde || 0, dur: opc.duracion || 45, pausa: false, prev: performance.now(), alAvanzar: opc.alAvanzar, alTerminar: opc.alTerminar };
+    ponerBus(dia, paseo.t, { seguir: true, suave: false });
+    return {
+      pausar() { if (paseo) paseo.pausa = true; },
+      seguir() { if (paseo) { paseo.pausa = false; paseo.prev = performance.now(); } },
+      detener() { quitarBus(); },
+      get pausado() { return !paseo || paseo.pausa; },
+    };
+  }
+  function pasoPaseo() {
+    if (bus && bus.visible) {
+      v.set(bus.position.x, bus.position.y + 3, bus.position.z).project(camara);
+      const fuera = v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05;
+      etBus.hidden = fuera;
+      if (!fuera) etBus.style.transform = `translate(${(v.x + 1) / 2 * cont.clientWidth}px, ${(1 - v.y) / 2 * cont.clientHeight}px) translate(-50%, -150%)`;
+    }
+    if (!paseo) return;
+    const ahora = performance.now();
+    if (!paseo.pausa) paseo.t = Math.min(1, paseo.t + (ahora - paseo.prev) / 1000 / paseo.dur);
+    paseo.prev = ahora;
+    ponerBus(paseo.dia, paseo.t, { seguir: true });
+    if (paseo.alAvanzar) paseo.alAvanzar(paseo.t);
+    if (paseo.t >= 1 && !paseo.pausa) { paseo.pausa = true; const fin = paseo.alTerminar; if (fin) fin(); }
+  }
+
   let anim = null;
   function volar(p1, o1) {
     anim = { t: 0, p0: camara.position.clone(), o0: (controles ? controles.target : CENTRO).clone(), p1, o1 };
@@ -1690,6 +1801,7 @@ function crearMapa3D(cont, cfg) {
       if (anim.t >= 1) anim = null;
     }
     if (controles) controles.update();
+    pasoPaseo();
     if (yo && yo.visible) {
       pulso = (pulso + 0.03) % 1;
       const k = 1 + pulso * 1.6;
@@ -1732,6 +1844,9 @@ function crearMapa3D(cont, cfg) {
     },
     altura,
     yo: ponerYo,
+    recorrer,
+    ponerBus,
+    quitarBus,
     quitarYo,
     dentro: (lat, lon) => lon >= LO0 && lon <= LO1 && lat >= LA0 && lat <= LA1,
   };
@@ -2033,9 +2148,14 @@ async function renderInicio() {
           <button class="chip" aria-pressed="true" data-d="0">Todo el viaje</button>
           ${D.dias.map((d) => `<button class="chip" aria-pressed="false" data-d="${d.n}"><span class="pt" style="background:${d.color}"></span>Día ${d.n}</button>`).join("")}
         </div>
-        <div class="figura mapa3d" id="mapa3d"></div>
+        <div class="figura mapa3d" id="mapa3d"><div class="hud" id="hud" hidden>
+          <div class="hud-fila"><b class="num" id="hud-hora"></b><span id="hud-tramo"></span></div>
+          <div class="hud-fila num"><span id="hud-km"></span><span id="hud-alt"></span></div>
+          <div class="barra-t"><i id="hud-barra"></i></div></div></div>
+        <div class="aviso" id="bus-hoy" hidden style="background:var(--hoja);border:1px solid var(--linea);border-left:4px solid #1d4f9c"></div>
         <div class="gps">
-          <div class="botones"><button class="btn prim" id="gps-btn" aria-pressed="false">📍 Seguir mi ubicación en vivo</button></div>
+          <div class="botones"><button class="btn prim" id="paseo-btn">🚌 Recorrer el viaje</button><button class="btn" id="gps-btn" aria-pressed="false">📍 Seguir mi ubicación en vivo</button></div>
+          <p class="pie">«Recorrer» lleva el autobús de Chapingo por la ruta y pinta de dorado lo ya recorrido, con la hora estimada según el itinerario. Elige un día arriba para recorrer solo ese día; en «Todo el viaje» recorre los días seguidos.</p>
           <div class="gps-info num" id="gps-info" hidden aria-live="polite"></div>
           <p class="pie">Funciona sin internet: el GPS del teléfono recibe la señal de los satélites, no de la red de datos. La primera ubicación puede tardar uno o dos minutos sin señal; mantén la pantalla encendida y la app abierta mientras la sigues.</p>
         </div>
@@ -2055,18 +2175,139 @@ async function renderInicio() {
     $("#chips-3d").addEventListener("click", (e) => {
       const b = e.target.closest(".chip"); if (!b || !mapa3d) return;
       $$("#chips-3d .chip").forEach((c) => c.setAttribute("aria-pressed", c === b ? "true" : "false"));
-      const n = Number(b.dataset.d); n ? mapa3d.dia(n) : mapa3d.general();
+      detenerPaseo();
+      const n = Number(b.dataset.d); diaElegido = n; n ? mapa3d.dia(n) : mapa3d.general();
+      const conRuta = !n || D.rutas.some((r) => r.dia === n);
+      $("#paseo-btn").textContent = !n ? "🚌 Recorrer el viaje" : conRuta ? `🚌 Recorrer el día ${n}` : "🚌 Día sin traslado";
+      $("#paseo-btn").disabled = !conRuta;
+      busHoy();
     });
     inicioListo = true;
     iniciar3D();
     $("#gps-btn").onclick = () => (gps.id == null ? iniciarGPS() : detenerGPS());
+    $("#paseo-btn").onclick = alternarPaseo;
+    busHoy();
+    setInterval(busHoy, 60000);
   }
   if (enfocarDia && mapa3d) {
-    const n = enfocarDia; enfocarDia = null;
+    const n = enfocarDia, recorrer = paseoAlEntrar; enfocarDia = null; paseoAlEntrar = false;
     $$("#chips-3d .chip").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.d) === n ? "true" : "false"));
+    detenerPaseo();
+    diaElegido = n;
+    $("#paseo-btn").textContent = `🚌 Recorrer el día ${n}`;
+    $("#paseo-btn").disabled = false;
     $("#t-3d").scrollIntoView({ block: "start" });
-    setTimeout(() => mapa3d.dia(n), 300);
+    setTimeout(() => (recorrer ? alternarPaseo() : mapa3d.dia(n)), 300);
   }
+}
+
+// ------------------------------------------------------------------ el autobús de Chapingo recorre la ruta del día
+let diaElegido = 0, paseo = null, paseoAlEntrar = false;
+const minDe = (h) => { const m = String(h || "").match(/\d{1,2}:\d{2}/g); return m ? m.map((x) => { const [a, b] = x.split(":").map(Number); return a * 60 + b; }) : null; };
+const hhmm = (m) => { const r = Math.round(m); return `${String(Math.floor(r / 60) % 24).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; };
+function lineaDeTiempo(d) {
+  // puntos (km, llega, sale) de los sitios con hora y kilómetro, en el orden del día
+  const pts = [];
+  for (const s of d.sitios) {
+    const h = minDe(s.hora);
+    if (!h || s.km == null) continue;
+    if (pts.length && s.km < pts[pts.length - 1].km) continue;
+    pts.push({ km: s.km, llega: h[0], sale: h[1] != null ? h[1] : h[0], s });
+  }
+  return pts;
+}
+function estadoEn(d, km) {
+  const pts = lineaDeTiempo(d);
+  if (!pts.length) return { hora: null, sig: null };
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (Math.abs(km - p.km) < 0.8) return { hora: p.llega, sig: p.s, en: true };
+    if (km < p.km) {
+      if (i === 0) return { hora: p.sale, sig: p.s };
+      const a = pts[i - 1], f = (km - a.km) / Math.max(0.1, p.km - a.km);
+      return { hora: a.sale + f * (p.llega - a.sale), sig: p.s };
+    }
+  }
+  return { hora: pts[pts.length - 1].sale, sig: null };
+}
+function kmEnHora(d, min) {
+  // posición estimada del autobús a una hora del día, según el itinerario
+  const pts = lineaDeTiempo(d);
+  if (!pts.length) return null;
+  if (min <= pts[0].sale) return pts[0].km;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (min < p.llega) { const a = pts[i - 1]; return a.km + (p.km - a.km) * (min - a.sale) / Math.max(1, p.llega - a.sale); }
+    if (min <= p.sale) return p.km;
+  }
+  return d.km;
+}
+function hudDia(d, t) {
+  const km = t * d.km, e = estadoEn(d, km);
+  const r = D.rutas.find((x) => x.dia === d.n), p = r.puntos[Math.min(r.puntos.length - 1, Math.round(t * (r.puntos.length - 1)))];
+  $("#hud").hidden = false;
+  $("#hud-hora").textContent = e.hora != null ? `Día ${d.n} · ${hhmm(e.hora)}` : `Día ${d.n}`;
+  $("#hud-tramo").textContent = e.en && e.sig ? `en ${CORTO(e.sig)}` : e.sig ? `rumbo a ${CORTO(e.sig)}` : "llegada al pernocte";
+  $("#hud-km").textContent = `km ${fmt(Math.round(km))} de ${fmt(Math.round(d.km))}`;
+  const alt = alturaMalla(p[0], p[1]);
+  $("#hud-alt").textContent = alt != null ? `${fmt(alt)} m` : "";
+  $("#hud-barra").style.width = (t * 100).toFixed(1) + "%";
+}
+function alternarPaseo() {
+  if (!mapa3d) return;
+  const btn = $("#paseo-btn");
+  if (paseo && !paseo.pausado) { paseo.pausar(); btn.textContent = "▶ Continuar"; return; }
+  if (paseo) { paseo.seguir(); btn.textContent = "❚❚ Pausa"; return; }
+  if (gps.id != null) detenerGPS();
+  $("#bus-hoy").hidden = true;
+  const dias = diaElegido ? [diaElegido] : D.rutas.map((r) => r.dia);
+  let k = 0;
+  const arrancar = () => {
+    const d = D.dias.find((x) => x.n === dias[k]);
+    if (!diaElegido) $$("#chips-3d .chip").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.d) === d.n ? "true" : "false"));
+    paseo = mapa3d.recorrer(d.n, {
+      duracion: Math.max(18, Math.min(60, d.km / 6)),
+      alAvanzar: (t) => hudDia(d, t),
+      alTerminar: () => {
+        k++;
+        if (k < dias.length) { setTimeout(arrancar, 900); return; }
+        paseo = null;
+        btn.textContent = "↺ Repetir";
+      },
+    });
+  };
+  arrancar();
+  btn.textContent = "❚❚ Pausa";
+}
+function detenerPaseo() {
+  if (paseo) paseo.detener();
+  paseo = null;
+  if (mapa3d) mapa3d.quitarBus();
+  const h = $("#hud");
+  if (h) h.hidden = true;
+}
+function busHoy() {
+  // durante el viaje, el autobús aparece donde debería ir según el itinerario de hoy
+  const caja = $("#bus-hoy");
+  if (!caja || !mapa3d || paseo || gps.id != null) return;
+  const d = D.dias.find((x) => x.iso === hoyISO());
+  if (!d || !D.rutas.some((r) => r.dia === d.n) || (diaElegido && diaElegido !== d.n)) { caja.hidden = true; return; }
+  const h = new Date(), km = kmEnHora(d, h.getHours() * 60 + h.getMinutes());
+  if (km == null) { caja.hidden = true; return; }
+  const t = Math.max(0, Math.min(1, km / d.km));
+  if (!busHoy.enfocado && !diaElegido) {
+    // la primera vez, el mapa se acerca al día de hoy
+    busHoy.enfocado = true;
+    $$("#chips-3d .chip").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.d) === d.n ? "true" : "false"));
+    diaElegido = d.n;
+    $("#paseo-btn").textContent = `🚌 Recorrer el día ${d.n}`;
+    mapa3d.dia(d.n);
+  }
+  mapa3d.ponerBus(d.n, t);
+  hudDia(d, t);
+  const e = estadoEn(d, km);
+  caja.hidden = false;
+  caja.innerHTML = `<b style="color:#1d4f9c">Hoy, día ${d.n}: así va el viaje</b><span>Según el itinerario, el autobús ${t >= 1 ? "ya llegó al pernocte" : e.en && e.sig ? `está en ${esc(CORTO(e.sig))}` : `va rumbo a ${esc(e.sig ? CORTO(e.sig) : "el pernocte")}`}: ${fmt(Math.round(km))} de ${fmt(Math.round(d.km))} km recorridos. Es una estimación por horario; para tu posición real usa «Seguir mi ubicación».</span>`;
 }
 // ------------------------------------------------------------------ ubicación en vivo sobre el 3D (GPS, sin internet)
 const gps = { id: null, primera: true, wake: null };
@@ -2203,7 +2444,7 @@ async function renderDia({ n }) {
         <button class="btn" data-accion="fotos-dia" data-n="${d.n}">⬇ Fotos del día (.zip)</button>
       </div>
       <div class="botones">
-        ${d.km ? `<button class="btn" data-accion="ver3d">Ver el día en 3D</button>` : ""}
+        ${d.km ? `<button class="btn" data-accion="ver3d" data-recorrer="1">🚌 Recorrer el día en 3D</button>` : ""}
         ${anterior ? `<a class="btn" href="#dia-${anterior.n}">‹ Día ${anterior.n}</a>` : ""}
         ${siguiente ? `<a class="btn" href="#dia-${siguiente.n}">Día ${siguiente.n} ›</a>` : ""}
       </div>
@@ -2395,6 +2636,7 @@ document.addEventListener("click", async (e) => {
     }
   } else if (b.dataset.accion === "ver3d") {
     enfocarDia = Number(location.hash.match(/dia-(\d)/)[1]);
+    paseoAlEntrar = !!b.dataset.recorrer;
     location.hash = "#inicio";
   } else if (b.dataset.accion === "nuevo-sitio") {
     formNuevoSitio();
