@@ -6,11 +6,11 @@ Centro Académico Regional Huatusco: el Integrador I (agosto a diciembre) y el I
 
 | Generación · grupo | Viaje | Fechas | Carpeta |
 |---|---|---|---|
-| 2026–2027 · grupo 21 | Viaje Generacional de Estudios · Viaje de Estudio Integrador I (versión 1.0.1, DOI 10.5281/zenodo.23781570) | 26 de noviembre al 4 de diciembre de 2026 | [`2026-grupo-21/`](2026-grupo-21/) |
+| 2026–2027 · grupo 21 | Viaje Generacional de Estudios · Viaje de Estudio Integrador I (versión 1.0.2, DOI 10.5281/zenodo.23787063) | 26 de noviembre al 4 de diciembre de 2026 | [`2026-grupo-21/`](2026-grupo-21/) |
 
 La dirección anterior (`recorridos-de-campo/propedeutico-21-2026/`) redirige aquí.
 
 ## Cómo citar
 
-- Mojica-Zárate, H. T. (2026). Viaje Generacional de Estudios: guía para celular del Viaje de Estudio Integrador I, Propedéutico grupo 21, 2026 (Versión 1.0.1) [Software]. Zenodo. https://doi.org/10.5281/zenodo.23781570
+- Mojica-Zárate, H. T. (2026). Viaje Generacional de Estudios: guía para celular del Viaje de Estudio Integrador I, Propedéutico grupo 21, 2026 (Versión 1.0.2) [Software]. Zenodo. https://doi.org/10.5281/zenodo.23787063
 
