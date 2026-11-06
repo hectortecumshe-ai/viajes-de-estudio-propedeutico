@@ -1023,6 +1023,12 @@ async function climogramaPNG(c, titulo) {
 
 // ------------------------------------------------------------------ registro y autores
 async function registro() { return (await BD.get("registro")) || null; }
+// nombre de quien usa el teléfono: el de la carta responsiva (o el de un registro anterior)
+async function miNombre() {
+  const c = (typeof carta !== "undefined" && carta) || (await BD.get("carta")) || {};
+  const r = await registro();
+  return c.nombre || (r && r.nombre) || "";
+}
 // equipos fijos: el equipo n es responsable del día n
 const equipoOficial = (n) => D.equipos[n] || D.equipos[String(n)] || [];
 const diaDe = (nombre) => D.dias.map((d) => d.n).find((n) => equipoOficial(n).includes(nombre)) || null;
@@ -1417,14 +1423,14 @@ function iniciar3D() {
 
 // ------------------------------------------------------------------ DÍAS
 async function renderDias() {
-  const reg = await registro();
+  const miDia = diaDe(await miNombre());
   $('[data-vista="dias"]').innerHTML = `
     <header class="portada"><p class="versalita">Itinerario</p><h1>Nueve días</h1>
       <p class="gris">${esc(V.fechas)}. Toca un día para ver sus sitios, tu cuaderno de campo y el reporte.</p></header>
     <div class="dias">${D.dias.map((d) => `
       <a class="dia-fila" href="#dia-${d.n}">
         <span class="dnum" style="background:${d.color}"><small>Día</small><b>${d.n}</b></span>
-        <div><p class="num">${esc(d.fecha)}${d.iso === hoyISO() ? '<span class="hoy">HOY</span>' : ""}${reg && reg.dia === d.n ? '<span class="hoy" style="background:var(--trigo)">TU REPORTE</span>' : ""}</p>
+        <div><p class="num">${esc(d.fecha)}${d.iso === hoyISO() ? '<span class="hoy">HOY</span>' : ""}${miDia === d.n ? '<span class="hoy" style="background:var(--trigo)">TU REPORTE</span>' : ""}</p>
           <h3>${esc(d.tema)}</h3><p>${esc(d.region)} · ${d.km ? fmt(d.km) + " km · " : "sin traslado · "}${fmt(d.alt_min)}–${fmt(d.alt_max)} m</p></div>
         <span class="flecha">›</span></a>`).join("")}</div>`;
 }
@@ -1796,8 +1802,7 @@ async function exportarDia(n) {
 async function exportarMiDia(n) {
   const d = D.dias.find((x) => x.n === n);
   aviso("Preparando tu día en Word…");
-  const r = await registro(), carta0 = (await BD.get("carta")) || {};
-  const quien = (r && r.nombre) || carta0.nombre || "";
+  const quien = await miNombre();
   const extras = (await BD.get("extras:" + n)) || [];
   const numFoto = { n: 0 };
   const b = [
@@ -1858,9 +1863,9 @@ async function exportarFotosDia(n) {
 }
 async function exportarCuaderno() {
   aviso("Preparando tu cuaderno…");
-  const r = await registro(), numFoto = { n: 0 };
+  const quien = await miNombre(), numFoto = { n: 0 };
   const b = [{ titulo: "Mi cuaderno de campo" }, { p: `${V.titulo} · ${V.asignatura} · ${V.nivel}`, jc: "left" },
-             { p: r ? "Estudiante: " + conMatricula(r.nombre) : "Estudiante: ______________________", b: true, jc: "left" }, { nota: V.fechas }];
+             { p: quien ? "Estudiante: " + conMatricula(quien) : "Estudiante: ______________________", b: true, jc: "left" }, { nota: V.fechas }];
   for (const d of D.dias) {
     const extras = (await BD.get("extras:" + d.n)) || [];
     b.push({ h1: `Día ${d.n}. ${d.tema}` }, { nota: `${d.fecha} · ${d.region}` });
@@ -1933,59 +1938,19 @@ async function abrirRespaldo(archivo) {
 // ------------------------------------------------------------------ EQUIPO
 async function renderEquipo() {
   const sec = $('[data-vista="equipo"]');
-  let r = await registro();
-  // un registro anterior con otro día se corrige al equipo fijo
-  if (r && diaDe(r.nombre) && r.dia !== diaDe(r.nombre)) { r = { ...r, dia: diaDe(r.nombre) }; await BD.set("registro", r); }
+  const yo = await miNombre();
   sec.innerHTML = `
     <header class="portada"><p class="versalita">Equipos y responsabilidades</p><h1>Un equipo por día</h1>
       <p>Los equipos son fijos: el equipo 1 es responsable del día 1, el equipo 2 del día 2, y así hasta el día 9. Ese día el equipo es autor del capítulo en el libro del viaje, cuida el equipaje de todo el grupo y deja limpio el autobús. Los profesores acompañantes son coautores del libro.</p></header>
     <div class="resp">${D.responsabilidades.map(([t, x]) => `<div style="background:var(--hoja)"><b>${esc(t)}</b>${esc(x)}</div>`).join("")}</div>
-    <section class="tarjeta" aria-labelledby="t-reg">
-      <h2 id="t-reg" style="font-size:1.2rem">Mi registro</h2>
-      ${r ? `<div class="aviso"><b>Registro confirmado</b><span>${esc(r.nombre)}${matriculaDe(r.nombre) ? " · " + esc(matriculaDe(r.nombre)) : ""} · <a href="#dia-${r.dia}">Equipo ${r.dia} · Día ${r.dia}: ${esc(D.dias[r.dia - 1].tema)}</a></span>
-          <span class="gris" style="font-size:.85rem">Registrado el ${esc(new Date(r.fecha).toLocaleString("es-MX"))}. Solo puedes registrarte una vez en todo el viaje.</span></div>
-        <div class="campo"><span>Tu equipo (coautores del reporte del día ${r.dia})</span>
-          <div class="autores">${equipoOficial(r.dia).map((x) => `<span class="autor">${esc(x)}</span>`).join("")}</div></div>
-        <details class="bloque"><summary><h4>¿Te equivocaste de nombre?</h4></summary><div class="cuerpo">
-          <p style="font-size:.92rem">Pide a un profesor que escriba su código para desbloquear este teléfono.</p>
-          <div class="botones"><input id="codigo" type="password" placeholder="Código del profesor" style="border:1px solid var(--linea);border-radius:8px;padding:8px 10px;background:var(--hoja)"><button class="btn peligro" id="desbloquear">Desbloquear</button></div></div></details>`
-      : `<p style="font-size:.95rem">Elige tu nombre: tu equipo y tu día ya están asignados por los profesores. <b>Solo te puedes registrar una vez en todo el viaje.</b></p>
-        <div class="fila-campos">
-          <label class="campo"><span>Mi nombre</span><select id="reg-nombre"><option value="">Elige tu nombre…</option>${D.estudiantes.map((x, i) => `<option value="${esc(x)}">${i + 1}. ${esc(x)}</option>`).join("")}</select></label>
-        </div>
-        <p class="gris" id="reg-asignado" style="font-size:.92rem;margin:0"></p>
-        <div class="botones"><button class="btn prim" id="registrar">Registrarme</button></div>`}
-    </section>
+    ${yo && diaDe(yo) ? `<div class="aviso"><b>Tu equipo</b><span>${esc(yo)} · <a href="#dia-${diaDe(yo)}">Equipo ${diaDe(yo)} · Día ${diaDe(yo)}: ${esc(D.dias[diaDe(yo) - 1].tema)}</a></span></div>`
+      : `<p class="gris" style="font-size:.92rem">Elige tu nombre en la <a href="#mas">carta responsiva</a> y aquí verás tu equipo; también saldrá en los Word de tu cuaderno.</p>`}
     <section aria-labelledby="t-eqs"><h2 id="t-eqs" style="font-size:1.2rem">Equipos fijos · Grupo 21</h2>
       <div class="tabla-wrap"><table><thead><tr><th class="num">Equipo</th><th>Día</th><th>Integrantes</th></tr></thead><tbody>${D.dias.map((d) => `<tr><td class="num">${d.n}</td><td><a href="#dia-${d.n}">Día ${d.n}</a><br><span class="gris" style="font-size:.85rem">${esc(d.fecha)}</span></td><td>${equipoOficial(d.n).map(esc).join("<br>")}</td></tr>`).join("")}</tbody></table></div></section>
     <section aria-labelledby="t-cat"><h2 id="t-cat" style="font-size:1.2rem">Catálogo de estudiantes · Grupo 21</h2>
       <input id="buscar-est" type="search" placeholder="Buscar por nombre o matrícula…" style="border:1px solid var(--linea);border-radius:10px;padding:9px 12px;background:var(--hoja);width:100%">
-      <div class="tabla-wrap"><table><thead><tr><th class="num">No.</th><th>Matrícula</th><th>Nombre</th><th class="num">Equipo</th></tr></thead><tbody id="cat">${D.estudiantes.map((x, i) => `<tr><td class="num">${i + 1}</td><td>${esc(matriculaDe(x))}</td><td>${esc(x)}${r && r.nombre === x ? ' <span class="autor">Yo</span>' : ""}</td><td class="num">${diaDe(x) || "—"}</td></tr>`).join("")}</tbody></table></div>
+      <div class="tabla-wrap"><table><thead><tr><th class="num">No.</th><th>Matrícula</th><th>Nombre</th><th class="num">Equipo</th></tr></thead><tbody id="cat">${D.estudiantes.map((x, i) => `<tr><td class="num">${i + 1}</td><td>${esc(matriculaDe(x))}</td><td>${esc(x)}${yo === x ? ' <span class="autor">Yo</span>' : ""}</td><td class="num">${diaDe(x) || "—"}</td></tr>`).join("")}</tbody></table></div>
       <p class="pie">${D.estudiantes.length} estudiantes en ${Object.keys(D.equipos).length} equipos. Profesores: ${V.profesores.map((p) => esc(p.nombre)).join(" y ")}.</p></section>`;
-  if (!r) {
-    $("#reg-nombre").onchange = (e) => {
-      const n = diaDe(e.target.value);
-      $("#reg-asignado").textContent = !e.target.value ? "" : n ? `Equipo ${n} · responsable del día ${n} (${D.dias[n - 1].fecha}).` : "Tu nombre no tiene equipo asignado. Revisa con los profesores.";
-    };
-    $("#registrar").onclick = async () => {
-      const nombre = $("#reg-nombre").value;
-      if (!nombre) return aviso("Elige tu nombre.");
-      const dia = diaDe(nombre);
-      if (!dia) return aviso("Tu nombre no tiene equipo asignado. Revisa con los profesores.");
-      const ok = await confirmar("Confirmar registro", `<p><b>${esc(nombre)}</b>${matriculaDe(nombre) ? "<br>Matrícula " + esc(matriculaDe(nombre)) : ""}<br>Equipo ${dia} · responsable del <b>día ${dia}</b> (${esc(D.dias[dia - 1].fecha)}).</p><p class="gris" style="font-size:.9rem">Después de confirmar ya no podrás cambiarlo sin el código de un profesor.</p>`, "Confirmar");
-      if (!ok) return;
-      await BD.set("registro", { nombre, dia, fecha: Date.now() });
-      pedirPersistencia();
-      aviso("Registro confirmado: día " + dia);
-      renderEquipo();
-    };
-  } else {
-    $("#desbloquear").onclick = async () => {
-      if ($("#codigo").value.trim().toUpperCase() !== String(V.codigo_profesor).toUpperCase()) return aviso("Código incorrecto.");
-      await BD.del("registro"); await BD.del("coautores:" + r.dia);
-      aviso("Registro desbloqueado"); renderEquipo();
-    };
-  }
   $("#buscar-est").addEventListener("input", (e) => {
     const q = e.target.value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
     $$("#cat tr").forEach((tr) => (tr.hidden = !tr.textContent.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().includes(q)));
