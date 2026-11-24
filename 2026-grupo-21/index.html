@@ -2059,6 +2059,10 @@ async function renderMas() {
   const val = (k) => esc(c[k] || "");
   sec.innerHTML = `
     <header class="portada"><p class="versalita">Antes de salir</p><h1>Carta responsiva y recomendaciones</h1></header>
+    <section class="tarjeta" aria-labelledby="t-instr"><h2 id="t-instr" style="font-size:1.2rem">Instructivo rápido</h2>
+      <p style="font-size:.95rem">Cómo usar esta app en dos páginas: instalarla, llenar la carta, tomar notas y fotos, armar y enviar el reporte de tu equipo y respaldar tus datos.</p>
+      <div class="botones"><a class="btn prim" href="${esc(V.url)}instructivo/Instructivo-rapido-Viaje-Generacional-21.pdf" target="_blank" rel="noopener">📘 Abrir el instructivo (PDF)</a><a class="btn" href="${esc(V.url)}instructivo/Instructivo-rapido-Viaje-Generacional-21.html" target="_blank" rel="noopener">Verlo como página web</a></div>
+      <p class="pie">Necesitas internet para abrirlo. Descarga el PDF para tenerlo sin señal.</p></section>
     <section class="tarjeta" aria-labelledby="t-carta">
       <h2 id="t-carta" style="font-size:1.2rem">Carta responsiva</h2>
       <p style="font-size:.95rem">Llénala aquí, fírmala con el dedo y crea el Word para imprimirla y entregarla firmada. Tus datos se quedan en este teléfono.</p>
